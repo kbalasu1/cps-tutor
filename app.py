@@ -9,7 +9,7 @@ from google import genai
 from google.genai import types
 from google.genai import errors as genai_errors
 
-from prompts import CPS_TUTOR_SYSTEM_INSTRUCTION
+from prompts import CPS_TUTOR_SYSTEM_INSTRUCTION, BALU_THATHA_OPENING_MESSAGE
 from secret_retrieval import get_api_key
 
 # --- Logging Setup ---
@@ -139,6 +139,16 @@ db_msgs = c.execute(
     (st.session_state.current_thread,)
 ).fetchall()
 
+# Greet on a brand-new, empty thread instead of showing a blank screen.
+# This is a canned message (no API call) so it's instant and can never fail.
+if not db_msgs:
+    c.execute(
+        "INSERT INTO messages (thread_id, role, content) VALUES (?, ?, ?)",
+        (st.session_state.current_thread, "model", BALU_THATHA_OPENING_MESSAGE)
+    )
+    conn.commit()
+    db_msgs = [("model", BALU_THATHA_OPENING_MESSAGE)]
+
 for role, content in db_msgs:
     with st.chat_message(role):
         st.markdown(content)
@@ -237,8 +247,9 @@ if prompt := st.chat_input("Ask a question, paste homework, or request practice.
             (st.session_state.current_thread, "model", reply_text)
         )
 
-        # Auto-title thread on first message
-        if len(db_msgs) == 0:
+        # Auto-title thread on the student's first real message (db_msgs may
+        # already contain the one-time opening greeting, which doesn't count)
+        if not any(r == "user" for r, _ in db_msgs):
             clean_title = prompt[:26] + "..." if len(prompt) > 26 else prompt
             c.execute(
                 "UPDATE threads SET title = ? WHERE id = ?",
