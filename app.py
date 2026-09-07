@@ -1,3 +1,4 @@
+import logging
 import os
 import sqlite3
 import time
@@ -6,9 +7,20 @@ import streamlit as st
 from PIL import Image
 from google import genai
 from google.genai import types
+from google.genai import errors as genai_errors
 
 from prompts import CPS_TUTOR_SYSTEM_INSTRUCTION
 from secret_retrieval import get_api_key
+
+# --- Logging Setup ---
+# Streamlit Cloud and HF Spaces both capture stderr into their app logs
+# panel, so a plain StreamHandler is enough - no log file needed (and the
+# filesystem is ephemeral on both platforms anyway).
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger("balu_thatha")
 
 st.set_page_config(
     page_title="Balu Thatha - CPS Tutor",
@@ -175,35 +187,69 @@ if prompt := st.chat_input("Ask a question, paste homework, or request practice.
     history_contents.append(types.Content(role="user", parts=current_parts))
 
     # Generate model response
+    call_succeeded = False
     with st.chat_message("assistant"):
         with st.spinner("Analyzing..."):
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=history_contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=CPS_TUTOR_SYSTEM_INSTRUCTION,
-                    temperature=0.4,
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=history_contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=CPS_TUTOR_SYSTEM_INSTRUCTION,
+                        temperature=0.4,
+                    )
                 )
-            )
-            reply_text = response.text
+                reply_text = response.text
+                if not reply_text:
+                    raise ValueError("Gemini returned an empty response")
+                call_succeeded = True
+            except genai_errors.APIError as e:
+                logger.exception(
+                    "Gemini API error (thread=%s, code=%s, prompt=%r)",
+                    st.session_state.current_thread, e.code, prompt[:80]
+                )
+                if e.code == 429:
+                    reply_text = (
+                        "🐢 Whoa, lots of questions coming in right now! "
+                        "Balu Thatha needs a minute to catch his breath - "
+                        "try asking again shortly."
+                    )
+                else:
+                    reply_text = (
+                        "🤔 Balu Thatha is having trouble connecting right now. "
+                        "Please try asking your question again in a moment."
+                    )
+            except Exception:
+                logger.exception(
+                    "Unexpected error during Gemini call (thread=%s, prompt=%r)",
+                    st.session_state.current_thread, prompt[:80]
+                )
+                reply_text = (
+                    "🤔 Something went sideways on Balu Thatha's end. "
+                    "Please try asking your question again in a moment."
+                )
             st.markdown(reply_text)
 
-    # Persist model message
-    c.execute(
-        "INSERT INTO messages (thread_id, role, content) VALUES (?, ?, ?)",
-        (st.session_state.current_thread, "model", reply_text)
-    )
-
-    # Auto-title thread on first message
-    if len(db_msgs) == 0:
-        clean_title = prompt[:26] + "..." if len(prompt) > 26 else prompt
+    if call_succeeded:
+        # Persist model message
         c.execute(
-            "UPDATE threads SET title = ? WHERE id = ?",
-            (clean_title, st.session_state.current_thread)
+            "INSERT INTO messages (thread_id, role, content) VALUES (?, ?, ?)",
+            (st.session_state.current_thread, "model", reply_text)
         )
 
+        # Auto-title thread on first message
+        if len(db_msgs) == 0:
+            clean_title = prompt[:26] + "..." if len(prompt) > 26 else prompt
+            c.execute(
+                "UPDATE threads SET title = ? WHERE id = ?",
+                (clean_title, st.session_state.current_thread)
+            )
+
     conn.commit()
-    st.rerun()
+    if call_succeeded:
+        st.rerun()
+    # On failure, skip the rerun so the friendly error bubble stays visible
+    # instead of vanishing on the next render (it was never persisted).
 
 # --- Notebook Quick-Save Button ---
 if db_msgs:
