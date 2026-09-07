@@ -1,9 +1,18 @@
 import os
 import streamlit as st
 
-def get_api_key() -> str:
-    if "GEMINI_API_KEY" in st.secrets:
-        return st.secrets["GEMINI_API_KEY"]
-    if "GEMINI_API_KEY" in os.environ:
-        return os.environ["GEMINI_API_KEY"]
+def _get_secret(name: str) -> str:
+    if name in st.secrets:
+        return st.secrets[name]
+    if name in os.environ:
+        return os.environ[name]
     return ""
+
+def get_api_key() -> str:
+    return _get_secret("GEMINI_API_KEY")
+
+def get_turso_url() -> str:
+    return _get_secret("TURSO_DATABASE_URL")
+
+def get_turso_auth_token() -> str:
+    return _get_secret("TURSO_AUTH_TOKEN")

@@ -1,53 +1,60 @@
 # Persistence Settings
 
-## Decision
+## Current decision: Turso (hosted libSQL)
 
-Use **Hugging Face Spaces Persistent Storage** (paid add-on) rather than an
-external service like Google Drive. It requires zero extra code or
-credentials — `app.py` already targets it correctly.
+Superseded an earlier HF-only plan (see "History" below) once we actually
+deployed to Streamlit Community Cloud, which has no paid-disk equivalent
+to HF's Persistent Storage add-on at all - its filesystem is ephemeral,
+full stop.
 
-## Why
+Turso is a free-tier hosted libSQL database (SQLite-compatible, network
+accessible). `app.py` connects to it via the `libsql` Python package,
+which mirrors the stdlib `sqlite3` API closely enough that the rest of
+the code (cursors, `.execute()`, `.fetchall()`, `.commit()`) didn't need
+to change - only `get_db_connection()` did.
 
-- The student's session data (chat threads, saved study notebook entries)
-  should survive Space restarts/sleeps, not just last for one browsing
-  session.
-- A Google Drive sync was considered as a free alternative, but it needs a
-  Google Cloud service account (project + Drive API + key management) and
-  adds per-message upload latency for a single-user app. Not worth the
-  operational overhead here.
-- HF's free tier gives the Space container an ephemeral disk — anything
-  written to it is wiped on restart/sleep. The Persistent Storage add-on
-  mounts a real disk at `/data` that survives those cycles.
+## Why this over the alternatives
+
+- **HF Persistent Storage (the old plan):** works, but only on HF Spaces,
+  costs money, and we're not currently deploying there (HF account is
+  still pending quota/verification).
+- **Google Drive sync:** considered early on, rejected - needs a service
+  account, adds per-message upload latency, and this solves the same
+  problem for free without any of that.
+- **Accept ephemeral storage:** simplest, but the whole point of the
+  Study Notebook is to keep explanations around to review later - losing
+  it on every redeploy/sleep defeats that.
+- **Turso:** free tier, works identically across local dev, Streamlit
+  Cloud, and HF Spaces (if we ever go back), no per-message latency
+  concerns for a single low-traffic user, minimal code change.
 
 ## How it works in this app
 
-`app.py` already contains the routing logic:
+`app.py`'s `get_db_connection()`:
+- If `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are both set (via
+  `st.secrets` or env vars, same pattern as `GEMINI_API_KEY`), connects
+  directly to the remote Turso database - every query goes over the
+  network, no local file involved.
+- Otherwise, falls back to a local SQLite file (`/data/tutor_data.db` if
+  `/data` exists - i.e. HF Persistent Storage is mounted - else
+  `./tutor_data.db` in the working directory). This fallback does NOT
+  survive redeploys/sleep on Streamlit Cloud or an HF Space without the
+  paid storage add-on.
 
-```python
-DB_DIR = "/data" if os.path.exists("/data") else "."
-DB_PATH = os.path.join(DB_DIR, "tutor_data.db")
-```
+## Setup steps (one-time)
 
-- If `/data` exists (Persistent Storage is enabled on the Space), the SQLite
-  DB lives there and survives restarts.
-- If `/data` doesn't exist (local dev, or a Space without the add-on), it
-  falls back to the working directory — fine for local testing, but data
-  will NOT survive a Space restart/sleep in that case.
+1. Create a free account at [turso.tech](https://turso.tech).
+2. Create a database: `turso db create balu-thatha`
+3. Get the URL: `turso db show balu-thatha --url`
+4. Create an auth token: `turso db tokens create balu-thatha`
+5. Add both as secrets (see `.streamlit/secrets.toml.example` for the
+   exact keys) - locally in `.streamlit/secrets.toml`, and in Streamlit
+   Community Cloud's app Settings -> Secrets for production.
 
-## Setup steps (do this once per Space)
+## History: the original HF-only plan
 
-1. Go to your Space → **Settings** → **Persistent Storage**.
-2. Pick a storage tier (check current HF pricing at the time you set this
-   up — it's a small monthly cost, billed per Space).
-3. Save. HF mounts the disk at `/data` automatically — no code change or
-   redeploy needed.
-4. Restart the Space once so `app.py` picks up `/data` on its next boot.
-
-## Not doing right now
-
-- Google Drive sync (service-account based) — revisit if the paid tier
-  becomes a blocker.
-- Any backup/export of the SQLite file — `/data` persists across
-  restarts, but isn't itself backed up. Low priority for a single-student
-  tool, but worth a manual export button later if the data starts to matter
-  more.
+Before this app was live anywhere, the plan was to rely on HF Spaces'
+paid Persistent Storage add-on, mounting a disk at `/data`. That's still
+what the `/data` fallback check in `get_db_connection()` is for, in case
+we ever deploy there without Turso configured - but it's no longer the
+primary plan now that Turso covers every deployment target uniformly.

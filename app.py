@@ -1,8 +1,8 @@
 import logging
 import os
-import sqlite3
 import time
 from datetime import datetime
+import libsql
 import streamlit as st
 from PIL import Image
 from google import genai
@@ -10,7 +10,7 @@ from google.genai import types
 from google.genai import errors as genai_errors
 
 from prompts import CPS_TUTOR_SYSTEM_INSTRUCTION, BALU_THATHA_OPENING_MESSAGE
-from secret_retrieval import get_api_key
+from secret_retrieval import get_api_key, get_turso_url, get_turso_auth_token
 
 # --- Logging Setup ---
 # Streamlit Cloud and HF Spaces both capture stderr into their app logs
@@ -29,12 +29,23 @@ st.set_page_config(
 )
 
 # --- Path & Persistence Setup ---
+# Prefer a Turso (hosted libSQL) database when configured - it's the same
+# SQLite dialect and API, but survives redeploys/sleep on any platform
+# (Streamlit Cloud, HF Spaces, or local). Falls back to a local file if
+# Turso isn't configured, which only persists for the life of the container.
 DB_DIR = "/data" if os.path.exists("/data") else "."
 DB_PATH = os.path.join(DB_DIR, "tutor_data.db")
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    return conn
+    turso_url = get_turso_url()
+    turso_token = get_turso_auth_token()
+    if turso_url and turso_token:
+        return libsql.connect(
+            database=turso_url,
+            auth_token=turso_token,
+            _check_same_thread=False,
+        )
+    return libsql.connect(database=DB_PATH, _check_same_thread=False)
 
 conn = get_db_connection()
 c = conn.cursor()

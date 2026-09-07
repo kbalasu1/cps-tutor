@@ -22,7 +22,7 @@ Schools (CPS) student, built to:
    PreACT 9 Secure exam taken in early 8th grade.
 3. **Remediate from real work** — upload photos of handwritten homework,
    math worksheets, or i-Ready diagnostic reports for targeted feedback.
-4. **Stay zero-friction** — runs on Hugging Face Spaces, no student login
+4. **Stay zero-friction** — runs in the browser, no student login
    required.
 
 ## Local development
@@ -32,24 +32,33 @@ pip install -r requirements.txt
 mkdir -p .streamlit
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 # edit .streamlit/secrets.toml and set GEMINI_API_KEY
+# (TURSO_DATABASE_URL / TURSO_AUTH_TOKEN are optional - see persistence-settings.md)
 streamlit run app.py
 ```
 
-## Deployment (Hugging Face Spaces)
+## Deployment
 
-1. Push this repo to a Space with SDK = `streamlit` (already configured via
-   the frontmatter above).
-2. In the Space's **Settings → Repository secrets**, add `GEMINI_API_KEY`.
-3. (Recommended) Enable **Persistent Storage** so chat history and the
-   study notebook survive restarts — see `persistence-settings.md` for
-   details.
+**Live at:** [balu-thatha.streamlit.app](https://balu-thatha.streamlit.app/)
+(Streamlit Community Cloud). A Hugging Face Space also exists as a backup
+target - both deploy from this same repo.
+
+1. Push to GitHub - the repo must stay **public** for Streamlit Community
+   Cloud's free tier to deploy from it.
+2. On [share.streamlit.io](https://share.streamlit.io), deploy from this
+   repo/`main`/`app.py`.
+3. In the app's **Settings → Secrets**, add `GEMINI_API_KEY` (and, for
+   persistence across redeploys, `TURSO_DATABASE_URL` /
+   `TURSO_AUTH_TOKEN` — see `persistence-settings.md`).
+
+Any push to `main` auto-redeploys the Streamlit Cloud app.
 
 ## Project layout
 
-- `app.py` — Streamlit UI, SQLite persistence, Gemini call loop.
+- `app.py` — Streamlit UI, libSQL/SQLite persistence, Gemini call loop.
 - `prompts.py` — the tutor's pedagogical system instruction (Socratic
-  method, homework-image handling, i-Ready domain mapping).
-- `secret_retrieval.py` — reads `GEMINI_API_KEY` from Streamlit secrets or
-  environment variables.
-- `persistence-settings.md` — the storage-tier decision and rationale.
+  method, homework-image handling, i-Ready domain mapping, topic
+  boundaries, opening greeting).
+- `secret_retrieval.py` — reads `GEMINI_API_KEY` and the optional Turso
+  credentials from Streamlit secrets or environment variables.
+- `persistence-settings.md` — the storage decision and rationale.
 - `spec.md` — original project specification.
